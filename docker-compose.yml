@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # --- Serviço de Setup (roda antes de tudo) ---
+  setup:
+    container_name: rpg_setup
+    image: node:20-alpine
+    working_dir: /workspace
+    volumes:
+      - ./scripts:/workspace/scripts
+      - .:/workspace/rpg-system-infra
+      - ../rpg-system-api:/workspace/rpg-system-api
+      - ../rpg-system-core:/workspace/rpg-system-core
+    command: >
+      sh -c "
+        echo '🔧 Configurando ambiente...' &&
+        node scripts/setup.js rpg-system-infra &&
+        node scripts/setup.js rpg-system-api &&
+        node scripts/setup.js rpg-system-core &&
+        echo '✅ Setup completo!'
+      "
+    restart: "no"
+
+  # --- Serviço da API (rpg-system-api) ---
+  api:
+    container_name: rpg_api
+    build:
+      context: ../rpg-system-api  # Caminho para a pasta do serviço da API
+      dockerfile: Dockerfile
+      args:
+        # Passa o token do arquivo .env para o ARG no Dockerfile durante o build
+        - NPM_TOKEN=${NPM_TOKEN}
+    ports:
+      - "3000:3000" # Expõe a porta 3000 do container para a sua máquina
+    volumes:
+      # Mapeia o código local para o container, ativando o hot-reload
+      - ../rpg-system-api:/usr/src/app
+      # Volume anônimo para o node_modules, evitando conflitos com a sua máquina local
+      - /usr/src/app/node_modules
+    # Garante que as variáveis do .env fiquem disponíveis para a aplicação
+    env_file:
+      - .env
+    # Comando para rodar a aplicação em modo de desenvolvimento
+    command: npm run start:dev
+    # Garante que o banco e o kafka subam antes da API
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  # --- Serviço do Banco de Dados (PostgreSQL) ---
+  postgres:
+    container_name: rpg_postgres
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Volume nomeado para persistir os dados do banco
+      - postgres_data:/var/lib/postgresql/data
+
+  # --- Serviços do Kafka ---
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    container_name: kafka
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  # --- Interface Web para Kafka (Debugging) ---
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      - kafka
+      - zookeeper
+
+# Define os volumes nomeados para persistência
+volumes:
+  postgres_data:

@@ -1,0 +1,20 @@
+{
+  "name": "rpg-system-infra",
+  "version": "1.0.0",
+  "description": "Infrastructure and setup scripts for RPG System",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node scripts/manual/start-all.js",
+    "docker:up": "docker-compose up",
+    "docker:up:build": "docker-compose up --build",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "keywords": [
+    "rpg",
+    "infrastructure",
+    "setup"
+  ],
+  "author": "",
+  "license": "ISC"
+}
